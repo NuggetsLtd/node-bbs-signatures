@@ -4,6 +4,9 @@ parameters:
   cache_version:
     type: string
     default: "v1"
+  aws_ecr_host:
+    type: string
+    default: "454245708275.dkr.ecr.eu-west-1.amazonaws.com"
 
 #+-----------------------------------------------------------------------------+
 #|                               COMMANDS                                      |
@@ -32,17 +35,18 @@ commands:
 #+-----------------------------------------------------------------------------+
 
 executors:
-  node:
-    docker:
-      - image: cimg/node:14.17.0
-
   node-14-linux-libc:
     docker:
-      - image: node:14
-
+      - image: << pipeline.parameters.aws_ecr_host >>/rust-node-14-libc-main:latest
   node-14-linux-musl:
     docker:
-      - image: node:14-alpine
+      - image: << pipeline.parameters.aws_ecr_host >>/rust-node-14-musl-main:latest
+  node-16-linux-libc:
+    docker:
+      - image: << pipeline.parameters.aws_ecr_host >>/rust-node-16-libc-main:latest
+  node-16-linux-musl:
+    docker:
+      - image: << pipeline.parameters.aws_ecr_host >>/rust-node-16-musl-main:latest
 
 #+-----------------------------------------------------------------------------+
 #|                                 JOBS                                        |
@@ -52,7 +56,11 @@ jobs:
   # test & lint jobs
 
   test:
-    executor: node
+    description: << parameters.executor >>
+    parameters:
+      executor:
+        type: executor
+    executor: << parameters.executor >>
     steps:
       - checkout
       - install_packages
@@ -60,11 +68,37 @@ jobs:
           name: Lint
           command: yarn lint
       - run:
+          name: Build
+          command: |
+            #!/bin/bash
+
+            OS=$(uname -o)
+
+            echo -e "\n 🏗️  Running Node v'$NODE_VERSION' build for '$OS'"
+            set -e
+
+            export PATH=$PATH:~/.cargo/bin
+
+            # check for MUSL Linux (non-GNU)
+            if [ "$OS" = "Linux" ]; then
+              CARGO_NET_GIT_FETCH_WITH_CLI=true
+              RUSTFLAGS="-C target-feature=-crt-static"
+              export RUSTFLAGS
+            else # GNU Linux
+              CARGO_NET_GIT_FETCH_WITH_CLI=false
+            fi
+
+            export CARGO_NET_GIT_FETCH_WITH_CLI
+
+            # build Neon binary for current architecture
+            echo -e "\n ⚒️  Building package\n"
+            /usr/local/bin/yarn build
+      - run:
           name: Test
           command: yarn test --coverage
       - run:
           name: Benchmark
-          command: yarn benchmarl
+          command: yarn benchmark
 
 #+-----------------------------------------------------------------------------+
 #|                                WORKFLOWS                                    |
@@ -76,10 +110,13 @@ workflows:
   # run all tests
   test:
     jobs:
-      - test: &test_filters
+      - test:
           context: nuggets
           filters:
             branches:
               ignore:
                 - master
-          name: Node BBS+ Signatures Package
+          name: "Node BBS+ Signatures: << matrix.executor >>"
+          matrix:
+            parameters:
+              executor: [node-14-linux-libc, node-14-linux-musl, node-16-linux-libc, node-16-linux-musl]
