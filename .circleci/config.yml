@@ -1,0 +1,85 @@
+version: 2.1
+
+parameters:
+  cache_version:
+    type: string
+    default: "v1"
+
+#+-----------------------------------------------------------------------------+
+#|                               COMMANDS                                      |
+#+-----------------------------------------------------------------------------+
+
+commands:
+  install_packages:
+    steps:
+      - run:
+          name: Authorize NPM
+          command: echo "//registry.npmjs.org/:_authToken=$PRIVATE_NPM_TOKEN" > ~/.npmrc
+      - restore_cache:
+          key: yarn-cache-<< pipeline.parameters.cache_version >>-{{ checksum "yarn.lock" }}
+      - run:
+          name: Install node modules
+          command: yarn install --pure-lockfile
+      - save_cache:
+          key: yarn-cache-<< pipeline.parameters.cache_version >>-{{ checksum "yarn.lock" }}
+          paths:
+            - /home/circleci/.cache/yarn
+            - /Users/distiller/Library/Caches/yarn
+            - /node_modules
+
+#+-----------------------------------------------------------------------------+
+#|                               EXECUTORS                                     |
+#+-----------------------------------------------------------------------------+
+
+executors:
+  node:
+    docker:
+      - image: cimg/node:14.17.0
+
+  node-14-linux-libc:
+    docker:
+      - image: node:14
+
+  node-14-linux-musl:
+    docker:
+      - image: node:14-alpine
+
+#+-----------------------------------------------------------------------------+
+#|                                 JOBS                                        |
+#+-----------------------------------------------------------------------------+
+
+jobs:
+  # test & lint jobs
+
+  test:
+    executor: node
+    steps:
+      - checkout
+      - install_packages
+      - run:
+          name: Lint
+          command: yarn lint
+      - run:
+          name: Test
+          command: yarn test --coverage
+      - run:
+          name: Benchmark
+          command: yarn benchmarl
+
+#+-----------------------------------------------------------------------------+
+#|                                WORKFLOWS                                    |
+#+-----------------------------------------------------------------------------+
+
+workflows:
+  version: 2
+
+  # run all tests
+  test:
+    jobs:
+      - test: &test_filters
+          context: nuggets
+          filters:
+            branches:
+              ignore:
+                - master
+          name: Node BBS+ Signatures Package
