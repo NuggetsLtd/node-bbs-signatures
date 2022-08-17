@@ -67,7 +67,6 @@ executors:
     environment:
       LC_ALL: en_US.UTF-8
       LANG: en_US.UTF-8
-      
 
 #+-----------------------------------------------------------------------------+
 #|                                 JOBS                                        |
@@ -135,7 +134,7 @@ jobs:
       - run:
           name: Install NPM Packages
           command: |
-            echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+            echo "//registry.npmjs.org/:_authToken=$PRIVATE_NPM_TOKEN" > ~/.npmrc
             yarn install --frozen-lockfile --production="false" --force
       - run:
           name: Build Typescript & Rust Binary
@@ -147,6 +146,85 @@ jobs:
           name: Benchmark
           command: yarn benchmark
 
+  # build & publish NPM Package
+  publish-package:
+    executor: mac
+    steps:
+      - checkout
+      - node/install:
+          install-yarn: true
+          node-version: "16"
+      - rust/install
+      - run:
+          name: Install NPM Packages
+          command: |
+            echo "//registry.npmjs.org/:_authToken=$PRIVATE_NPM_TOKEN" > ~/.npmrc
+            yarn install --frozen-lockfile --production="false" --force
+      - run:
+          name: Build Typescript & Rust Binary
+          command: yarn build
+      - run:
+          name: Publish NPM Package
+          command: yarn publish:ts
+
+  # build & publish for linux
+  publish-linux:
+    description: << parameters.executor >>
+    parameters:
+      executor:
+        type: executor
+    executor: << parameters.executor >>
+    steps:
+      - checkout
+      - install_packages
+      - run:
+          name: Build Rust Binary
+          command: |
+            #!/bin/bash
+            OS=$(uname -o)
+            echo -e "\n 🏗️  Running Node v'$NODE_VERSION' build for '$OS'"
+            set -e
+            export PATH=$PATH:~/.cargo/bin
+            # check for MUSL Linux (non-GNU)
+            if [ "$OS" = "Linux" ]; then
+              CARGO_NET_GIT_FETCH_WITH_CLI=true
+              RUSTFLAGS="-C target-feature=-crt-static"
+              export RUSTFLAGS
+            else # GNU Linux
+              CARGO_NET_GIT_FETCH_WITH_CLI=false
+            fi
+            export CARGO_NET_GIT_FETCH_WITH_CLI
+            # build Neon binary for current architecture
+            echo -e "\n ⚒️  Building package\n"
+            /usr/local/bin/yarn build
+      - run:
+          name: Publish Rust Binary
+          command: yarn publish:binary
+
+  # build & publish for macos
+  publish-mac:
+    description: << parameters.node-version >>
+    parameters:
+      node-version:
+        type: string
+    executor: mac
+    steps:
+      - checkout
+      - node/install:
+          install-yarn: true
+          node-version: << parameters.node-version >>
+      - rust/install
+      - run:
+          name: Install NPM Packages
+          command: |
+            echo "//registry.npmjs.org/:_authToken=$PRIVATE_NPM_TOKEN" > ~/.npmrc
+            yarn install --frozen-lockfile --production="false" --force
+      - run:
+          name: Build Typescript & Rust Binary
+          command: yarn build
+      - run:
+          name: Publish Rust Binary
+          command: yarn publish:binary
 
 #+-----------------------------------------------------------------------------+
 #|                                WORKFLOWS                                    |
@@ -175,6 +253,41 @@ workflows:
               ignore:
                 - master
           name: "Node BBS+ Signatures: node-<< matrix.node-version >>-macos"
+          matrix:
+            parameters:
+              node-version: ["14", "16"]
+
+  # build & publish binaries
+  publish:
+    jobs:
+      - publish-package:
+          context: nuggets
+          filters:
+            branches:
+              only:
+                - master
+          name: "Publish: NPM Package"
+      - publish-linux:
+          context: nuggets
+          requires:
+            - "Publish: NPM Package"
+          filters:
+            branches:
+              only:
+                - master
+          name: "Publish: << matrix.executor >>"
+          matrix:
+            parameters:
+              executor: [node-14-linux-libc, node-14-linux-musl, node-16-linux-libc, node-16-linux-musl]
+      - publish-mac:
+          context: nuggets
+          requires:
+            - "Publish: NPM Package"
+          filters:
+            branches:
+              only:
+                - master
+          name: "Publish: node-<< matrix.node-version >>-macos-undefined"
           matrix:
             parameters:
               node-version: ["14", "16"]
