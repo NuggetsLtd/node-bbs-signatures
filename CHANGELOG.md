@@ -1,3 +1,5 @@
+## [0.15.4](https://github.com/NuggetsLtd/node-bbs-signatures/compare/v0.15.1...v0.15.4) (2022-08-18)
+
 ## [0.15.3](https://github.com/NuggetsLtd/node-bbs-signatures/compare/v0.15.1...v0.15.3) (2022-08-17)
 
 ## 0.15.1 (2022-08-15)
